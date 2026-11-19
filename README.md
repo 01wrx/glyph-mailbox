@@ -1,30 +1,65 @@
 # glyph-mailbox
 
-A mailbox for one owner, on that owner's LAN. It holds sealed glyph letters while apps are closed. It cannot read them.
+A mailbox for one owner, on that owner's LAN. It holds sealed [glyph](https://github.com/01wrx/glyph) letters while the apps are closed. It cannot read them.
 
-[glyph](https://github.com/01wrx/glyph) is the app people use. This program is only the box.
+glyph is the program people run. This module is the box.
 
-## Who it talks to
+## Place
 
-The owner, and friends the owner has introduced by full glyph ID. No one else. There is no open enrollment and no directory.
+The listener accepts a private LAN address, loopback, or a link-local address. A public address, an unspecified address such as `0.0.0.0`, or a hostname is refused, and nothing is bound. A connection whose source address is public is closed. The listener does not advertise itself.
 
-The listener binds to the LAN and speaks TLS 1.3. Clients pin the public key in `box-pub`. A connection whose source address is public is closed. The listener does not advertise itself.
+Clients speak TLS 1.3 and pin the public key in `box-pub`. A certificate that is not that key is rejected before any letter is sent.
 
-## What it stores
+## Who
 
-Opaque blobs. Each blob is addressed to a glyph ID on the allowlist. The mailbox does not look inside.
+The owner, and friends the owner has introduced by a full glyph ID. A glyph ID is `glyph:` plus the 64-character lowercase hex of one canonical Ed25519 public key. A short prefix is not an address. There is no open enrollment and no directory.
 
-Both directions of a conversation live here. Alice's letters wait for Alice. Bob's letters wait for Bob.
+The mailbox stores the owner's public glyph ID. It is not given a private key, so it cannot open a letter or choose a sender. Each caller proves the glyph ID they claim. After that handshake, each request on the connection is signed and numbered.
 
-## What it does
+## Letters
 
-- Accept a sealed letter for an allowlisted recipient.
-- Return that recipient's waiting letters, one page at a time, when their app asks.
-- Forget a letter when that recipient's app acknowledges it or drops it.
-- Remove a friend when the owner asks, and delete that friend's inbound lane.
+A stored letter is an opaque blob, at most 64 KiB, addressed to a glyph ID on the allowlist. Both people in a conversation have a lane here. Each recipient's lane holds at most 1024 letters that have not been acknowledged.
 
-Order is not decided here. Each letter's sender already put a counter and a send time inside the seal. The glyph app orders by the counter and shows the time.
+The box will:
 
-## What it does not do
+- accept a sealed letter for an allowlisted recipient
+- return that recipient's waiting letters, one page at a time
+- forget a letter when that recipient acknowledges it or drops it
+- remove a friend when the owner asks, and delete that friend's inbound lane
 
-It does not decrypt, search, rewrite, or forward letters onto the internet. It does not learn who is online. It does not introduce people to each other. A glyph ID the owner has not added cannot drop mail and cannot pick mail up.
+Order is inside the seal. The glyph app orders by the sender's counter and shows the sender's time. The mailbox does not decrypt, search, rewrite, or forward letters onto the internet. It does not learn who is online. It does not introduce people to each other.
+
+## From glyph
+
+glyph starts this process for its owner:
+
+```powershell
+glyph mailbox -dir C:\mailbox-data -owner glyph:... -addr 192.168.1.20:7420
+```
+
+The window's mailbox setup does that on this machine. A friend on the same LAN points glyph at that address and the `box-pub` key with `GLYPH_MAILBOX` and `GLYPH_MAILBOX_KEY`.
+
+## Library
+
+```go
+box, err := mailbox.New(dir, ownerID)
+addr, err := box.Start("192.168.1.20:7420")
+
+client, err := mailbox.Dial(addr, privateKey, box.Pin())
+err = client.Introduce(friendID)
+err = client.Put(friendID, blob)
+letters, err := client.List()
+err = client.Ack(ids)
+err = client.Drop(ids)
+err = client.Remove(friendID)
+```
+
+`New` creates the directory and the box key. `LoadPub` reads `box-pub` later. The private key stays in the mailbox directory.
+
+The Go module path is `glyph-mailbox`. The glyph app expects this checkout beside it, at `../glyph-mailbox`.
+
+## Checks
+
+```powershell
+go test ./...
+```
